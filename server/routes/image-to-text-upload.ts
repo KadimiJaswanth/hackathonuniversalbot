@@ -1,4 +1,5 @@
 import type { RequestHandler } from "express";
+import Tesseract from "tesseract.js";
 
 const HF_API_BASE = "https://api-inference.huggingface.co/models";
 const MODEL_PREFERENCE = [
@@ -65,15 +66,25 @@ export const handleImageToTextUpload: RequestHandler = async (req, res) => {
       process.env.HF_TOKEN ||
       process.env.HUGGING_FACE_TOKEN ||
       process.env.HF_API_TOKEN;
-    if (!token) {
-      res.status(500).json({ error: "Missing Hugging Face token (HF_TOKEN)" });
-      return;
-    }
+    const hasHF = Boolean(token);
 
     const file = (req as any).file as Express.Multer.File | undefined;
     if (!file?.buffer?.length) {
       res.status(400).json({ error: "No image uploaded" });
       return;
+    }
+
+    // Fallback path: OCR only if HF token is not configured
+    if (!hasHF) {
+      try {
+        const ocr = await Tesseract.recognize(file.buffer, "eng");
+        const text = (ocr?.data?.text || "").trim();
+        res.json({ caption: text || "" });
+        return;
+      } catch {
+        res.json({ caption: "" });
+        return;
+      }
     }
 
     const preferred = MODEL_PREFERENCE.length
@@ -87,7 +98,7 @@ export const handleImageToTextUpload: RequestHandler = async (req, res) => {
     for (const model of preferred) {
       try {
         const cap = (
-          await requestCaption(token, model, file.buffer, ct)
+          await requestCaption(token as string, model, file.buffer, ct)
         ).trim();
         if (cap) {
           res.json({ caption: cap, model });
