@@ -5,6 +5,7 @@ import type { RequestHandler } from "express";
 // Env: HF_TOKEN (required), HF_IMAGE_TO_TEXT_MODEL (optional)
 
 const HF_API_BASE = "https://api-inference.huggingface.co/models";
+const DEFAULT_MODEL = "nlpconnect/vit-gpt2-image-captioning";
 const MODEL_PREFERENCE = [
   process.env.HF_IMAGE_TO_TEXT_MODEL,
   "Salesforce/blip-image-captioning-large",
@@ -66,7 +67,7 @@ export const handleImageToText: RequestHandler = async (req, res) => {
           Accept: "application/json",
           "x-wait-for-model": "true",
         },
-        body,
+        body: body as any,
       });
       if (!upstream.ok) {
         const detail = await upstream.text().catch(() => "");
