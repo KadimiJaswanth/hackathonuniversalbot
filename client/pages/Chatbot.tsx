@@ -717,6 +717,19 @@ export default function Chatbot() {
     }
   };
 
+  useEffect(() => {
+    (async () => {
+      try {
+        if (navigator.mediaDevices?.getUserMedia) {
+          const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mic.getTracks().forEach((t) => t.stop());
+          const cam = await navigator.mediaDevices.getUserMedia({ video: true });
+          cam.getTracks().forEach((t) => t.stop());
+        }
+      } catch {}
+    })();
+  }, []);
+
   return (
     <Layout>
       <div className="flex h-[calc(100vh-8rem)]">
