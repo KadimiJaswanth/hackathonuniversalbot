@@ -10,7 +10,7 @@ export const handleSignProxy: RequestHandler = async (req, res) => {
   try {
     const base = process.env.SIGN_SERVER_URL; // e.g., http://localhost:8000/predict
     if (!base) {
-      res.status(500).json({ error: "Missing SIGN_SERVER_URL" });
+      res.json({ result: "Sign server not configured" });
       return;
     }
 
