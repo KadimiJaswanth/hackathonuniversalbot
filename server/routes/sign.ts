@@ -48,13 +48,11 @@ export const handleSignProxy: RequestHandler = async (req, res) => {
     }
 
     if (!upstream.ok) {
-      res
-        .status(502)
-        .json({
-          error: "Sign server error",
-          status: upstream.status,
-          detail: json,
-        });
+      res.status(502).json({
+        error: "Sign server error",
+        status: upstream.status,
+        detail: json,
+      });
       return;
     }
 

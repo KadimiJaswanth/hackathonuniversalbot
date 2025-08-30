@@ -119,7 +119,9 @@ export const handleImageToText: RequestHandler = async (req, res) => {
     const ct = isPng ? "image/png" : "image/jpeg";
     for (const m of preferred) {
       try {
-        const caption = (await requestCaption(token as string, m, buf, ct)).trim();
+        const caption = (
+          await requestCaption(token as string, m, buf, ct)
+        ).trim();
         if (caption) {
           res.json({ caption, model: m });
           return;
