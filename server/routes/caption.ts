@@ -66,10 +66,8 @@ export const handleCaption: RequestHandler = async (req, res) => {
       process.env.HF_TOKEN ||
       process.env.HUGGING_FACE_TOKEN ||
       process.env.HF_API_TOKEN;
-    if (!token) {
-      res.status(500).json({ error: "Missing Hugging Face token (HF_TOKEN)" });
-      return;
-    }
+    const hasHF = Boolean(token);
+
     const file = (req as any).file as Express.Multer.File | undefined;
     if (!file?.buffer?.length) {
       res.status(400).json({ error: "No image uploaded" });
@@ -86,26 +84,28 @@ export const handleCaption: RequestHandler = async (req, res) => {
       if (text && conf >= 60) detectedText = text;
     } catch {}
 
-    // 2) Caption (try preferred models)
-    const preferred = MODEL_PREFERENCE.length
-      ? MODEL_PREFERENCE
-      : ["nlpconnect/vit-gpt2-image-captioning"];
-    const ct =
-      file.mimetype && typeof file.mimetype === "string"
-        ? file.mimetype
-        : undefined;
+    // 2) Caption (try preferred models) — only if HF token is configured
     let hfCaption = "";
-    for (const model of preferred) {
-      try {
-        const cap = (
-          await requestCaption(token, model, file.buffer, ct)
-        ).trim();
-        if (cap) {
-          hfCaption = cap;
-          break;
+    if (hasHF) {
+      const preferred = MODEL_PREFERENCE.length
+        ? MODEL_PREFERENCE
+        : ["nlpconnect/vit-gpt2-image-captioning"];
+      const ct =
+        file.mimetype && typeof file.mimetype === "string"
+          ? file.mimetype
+          : undefined;
+      for (const model of preferred) {
+        try {
+          const cap = (
+            await requestCaption(token as string, model, file.buffer, ct)
+          ).trim();
+          if (cap) {
+            hfCaption = cap;
+            break;
+          }
+        } catch {
+          continue;
         }
-      } catch {
-        continue;
       }
     }
 

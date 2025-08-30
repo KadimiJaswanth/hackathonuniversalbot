@@ -1,8 +1,9 @@
 import type { RequestHandler } from "express";
+import Tesseract from "tesseract.js";
 
 // Image captioning using Hugging Face Inference API
 // Expects JSON body: { imageBase64: dataUrl | base64 string, model?: string }
-// Env: HF_TOKEN (required), HF_IMAGE_TO_TEXT_MODEL (optional)
+// Env: HF_TOKEN (optional). If missing, falls back to OCR-only.
 
 const HF_API_BASE = "https://api-inference.huggingface.co/models";
 const DEFAULT_MODEL = "nlpconnect/vit-gpt2-image-captioning";
@@ -30,10 +31,7 @@ export const handleImageToText: RequestHandler = async (req, res) => {
       process.env.HF_TOKEN ||
       process.env.HUGGING_FACE_TOKEN ||
       process.env.HF_API_TOKEN;
-    if (!token) {
-      res.status(500).json({ error: "Missing Hugging Face token (HF_TOKEN)" });
-      return;
-    }
+    const hasHF = Boolean(token);
 
     const imageBase64 = (req.body?.imageBase64 || "") as string;
     const model = (req.body?.model || DEFAULT_MODEL) as string;
@@ -46,6 +44,19 @@ export const handleImageToText: RequestHandler = async (req, res) => {
     if (!buf?.length) {
       res.status(400).json({ error: "Invalid image data" });
       return;
+    }
+
+    // Fallback path: OCR only if HF token is not configured
+    if (!hasHF) {
+      try {
+        const ocr = await Tesseract.recognize(buf, "eng");
+        const text = (ocr?.data?.text || "").trim();
+        res.json({ caption: text || "" });
+        return;
+      } catch {
+        res.json({ caption: "" });
+        return;
+      }
     }
 
     const preferred = MODEL_PREFERENCE.length
@@ -108,7 +119,9 @@ export const handleImageToText: RequestHandler = async (req, res) => {
     const ct = isPng ? "image/png" : "image/jpeg";
     for (const m of preferred) {
       try {
-        const caption = (await requestCaption(token, m, buf, ct)).trim();
+        const caption = (
+          await requestCaption(token as string, m, buf, ct)
+        ).trim();
         if (caption) {
           res.json({ caption, model: m });
           return;
