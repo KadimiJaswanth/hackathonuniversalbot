@@ -937,7 +937,7 @@ export default function Chatbot() {
                   <Camera className="mr-2 h-4 w-4" />
                   Image to Text
                 </Button>
-                <DialogContent>
+                <DialogContent className="sm:max-w-md">
                   <DialogHeader>
                     <DialogTitle>Image to Text</DialogTitle>
                     <DialogDescription>
@@ -947,7 +947,7 @@ export default function Chatbot() {
                   <div className="space-y-3">
                     <video
                       ref={videoRef}
-                      className="w-full rounded border"
+                      className="w-full rounded border max-h-40 object-contain"
                       autoPlay
                       playsInline
                       muted
@@ -956,7 +956,7 @@ export default function Chatbot() {
                       <img
                         src={lastImage}
                         alt="Selected preview"
-                        className="w-full max-h-60 object-contain rounded border"
+                        className="w-full max-h-40 object-contain rounded border"
                       />
                     ) : null}
                     <div className="flex gap-2">
@@ -1001,112 +1001,6 @@ export default function Chatbot() {
                         disabled={ocrLoading || !lastImage}
                       >
                         {ocrLoading ? "Extracting..." : "Extract Text"}
-                      </Button>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={async (e) => {
-                          const f = e.target.files?.[0];
-                          if (!f) return;
-                          const reader = new FileReader();
-                          reader.onload = async () => {
-                            const dataUrl = reader.result as string;
-                            setLastImage(dataUrl);
-                            setLastFile(f);
-                            await describeFromSource(f, dataUrl);
-                            try {
-                              if (fileInputRef.current)
-                                (fileInputRef.current as any).value = "";
-                            } catch {}
-                          };
-                          reader.readAsDataURL(f);
-                        }}
-                      />
-                      <Button
-                        variant="outline"
-                        onClick={() => fileInputRef.current?.click()}
-                      >
-                        Upload Image
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={async () => {
-                          if (!lastImage) return;
-                          setCaptionLoading(true);
-                          try {
-                            let caption = "";
-                            try {
-                              if (lastFile) {
-                                const fd = new FormData();
-                                fd.append("image", lastFile);
-                                const up = await fetch("/api/image-to-text-upload", {
-                                  method: "POST",
-                                  body: fd,
-                                });
-                                if (up.ok) {
-                                  const dataUp = await up.json();
-                                  caption = (dataUp?.caption || "").trim();
-                                }
-                              } else if (lastImage) {
-                                const blob = await dataUrlToBlob(lastImage);
-                                const fd = new FormData();
-                                fd.append("image", blob, "capture.png");
-                                const up = await fetch("/api/image-to-text-upload", {
-                                  method: "POST",
-                                  body: fd,
-                                });
-                                if (up.ok) {
-                                  const dataUp = await up.json();
-                                  caption = (dataUp?.caption || "").trim();
-                                }
-                              }
-                            } catch {}
-
-                            const ocrText = await ocrOnDataUrl(lastImage);
-                            const combined = caption
-                              ? ocrText
-                                ? `${caption}\n\n${ocrText}`
-                                : caption
-                              : ocrText;
-                            if (combined) {
-                              const final = await translateIfNeeded(combined);
-                              const botResponse: Message = {
-                                id: (Date.now() + 5).toString(),
-                                content: final,
-                                isUser: false,
-                                timestamp: new Date(),
-                              };
-                              setMessages((prev) => [...prev, botResponse]);
-                            } else {
-                              setMessages((prev) => [
-                                ...prev,
-                                {
-                                  id: (Date.now() + 10).toString(),
-                                  content: "No description or text found.",
-                                  isUser: false,
-                                  timestamp: new Date(),
-                                },
-                              ]);
-                            }
-                          } catch {
-                            setMessages((prev) => [
-                              ...prev,
-                              {
-                                id: (Date.now() + 11).toString(),
-                                content: "Image processing unavailable.",
-                                isUser: false,
-                                timestamp: new Date(),
-                              },
-                            ]);
-                          } finally {
-                            setCaptionLoading(false);
-                          }
-                        }}
-                        disabled={captionLoading || !lastImage}
-                      >
-                        {captionLoading ? "Describing..." : "Describe (Caption + OCR)"}
                       </Button>
                       <Button
                         variant="outline"
