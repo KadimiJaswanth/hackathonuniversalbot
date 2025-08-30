@@ -1,6 +1,7 @@
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -71,6 +72,7 @@ export default function Chatbot() {
   const [captionLoading, setCaptionLoading] = useState(false);
   const [lastImage, setLastImage] = useState<string | null>(null);
   const [lastFile, setLastFile] = useState<File | null>(null);
+  const [extractedText, setExtractedText] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [usecase, setUsecase] = useState<null | {
     key: string;
@@ -629,7 +631,24 @@ export default function Chatbot() {
   }, []);
 
   useEffect(() => {
-    if (!ocrOpen) {
+    if (ocrOpen) {
+      (async () => {
+        try {
+          const constraints: MediaStreamConstraints = {
+            video: { facingMode: { ideal: "environment" } },
+            audio: false,
+          };
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          streamRef.current = stream;
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            try {
+              await videoRef.current.play();
+            } catch {}
+          }
+        } catch {}
+      })();
+    } else {
       try {
         const tracks = streamRef.current?.getTracks?.() || [];
         tracks.forEach((t) => t.stop());
@@ -931,31 +950,6 @@ export default function Chatbot() {
                       <Button
                         variant="outline"
                         onClick={async () => {
-                          try {
-                            const constraints: MediaStreamConstraints = {
-                              video: { facingMode: { ideal: "environment" } },
-                              audio: false,
-                            };
-                            const stream =
-                              await navigator.mediaDevices.getUserMedia(
-                                constraints,
-                              );
-                            streamRef.current = stream;
-                            if (videoRef.current) {
-                              videoRef.current.srcObject = stream;
-                              try {
-                                await videoRef.current.play();
-                              } catch {}
-                            }
-                          } catch (e) {
-                            // ignore
-                          }
-                        }}
-                      >
-                        Start Camera
-                      </Button>
-                      <Button
-                        onClick={async () => {
                           const video = videoRef.current;
                           if (!video) return;
                           const canvas = document.createElement("canvas");
@@ -963,67 +957,21 @@ export default function Chatbot() {
                           canvas.height = video.videoHeight || 480;
                           const ctx = canvas.getContext("2d");
                           if (!ctx) return;
-                          ctx.drawImage(
-                            video,
-                            0,
-                            0,
-                            canvas.width,
-                            canvas.height,
-                          );
-                          // Simple preprocessing to improve OCR accuracy
-                          try {
-                            const img = ctx.getImageData(
-                              0,
-                              0,
-                              canvas.width,
-                              canvas.height,
-                            );
-                            const d = img.data;
-                            for (let i = 0; i < d.length; i += 4) {
-                              const r = d[i],
-                                g = d[i + 1],
-                                b = d[i + 2];
-                              let v = 0.2126 * r + 0.7152 * g + 0.0722 * b; // grayscale
-                              v = v * 1.2 - 20; // contrast/brightness tweak
-                              v = v < 0 ? 0 : v > 255 ? 255 : v;
-                              const thr = v > 180 ? 255 : 0; // binarize
-                              d[i] = d[i + 1] = d[i + 2] = thr;
-                            }
-                            ctx.putImageData(img, 0, 0);
-                          } catch {}
+                          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                           const dataUrl = canvas.toDataURL("image/png");
                           setLastImage(dataUrl);
                           setLastFile(null);
+                        }}
+                      >
+                        Capture Photo
+                      </Button>
+                      <Button
+                        onClick={async () => {
+                          if (!lastImage) return;
                           setOcrLoading(true);
                           try {
-                            // Load Tesseract.js from CDN lazily
-                            if (!(window as any).Tesseract) {
-                              await new Promise<void>((resolve, reject) => {
-                                const s = document.createElement("script");
-                                s.src =
-                                  "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
-                                s.onload = () => resolve();
-                                s.onerror = () =>
-                                  reject(new Error("Failed to load OCR"));
-                                document.head.appendChild(s);
-                              });
-                            }
-                            const { Tesseract } = window as any;
-                            const ocr = readSetting<string>(
-                              "settings.ocrLang",
-                              "eng",
-                            );
-                            const result = await Tesseract.recognize(
-                              dataUrl,
-                              ocr,
-                              {
-                                tessedit_char_whitelist:
-                                  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -'",
-                                preserve_interword_spaces: "1",
-                                tessedit_pageseg_mode: "6",
-                              },
-                            );
-                            const text = result?.data?.text?.trim();
+                            const text = await ocrOnDataUrl(lastImage);
+                            setExtractedText(text || "");
                             if (text) {
                               const final = await translateIfNeeded(text);
                               const botResponse: Message = {
@@ -1037,9 +985,9 @@ export default function Chatbot() {
                           } catch {}
                           setOcrLoading(false);
                         }}
-                        disabled={ocrLoading}
+                        disabled={ocrLoading || !lastImage}
                       >
-                        {ocrLoading ? "Processing..." : "OCR (Extract Text)"}
+                        {ocrLoading ? "Extracting..." : "Extract Text"}
                       </Button>
                       <input
                         ref={fileInputRef}
@@ -1160,10 +1108,17 @@ export default function Chatbot() {
                         Stop Camera
                       </Button>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Tip: Use "Describe (HF)" for scene/product descriptions.
-                      Use OCR to read printed text in the image.
-                    </p>
+                    <div className="space-y-2 w-full">
+                      <label className="text-sm font-medium">Extracted Text</label>
+                      <Textarea
+                        value={extractedText}
+                        onChange={(e) => setExtractedText(e.target.value)}
+                        placeholder="No text extracted yet."
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Tip: Capture first, then use “Extract Text”. Use “Describe (Caption + OCR)” for scene descriptions.
+                      </p>
+                    </div>
                   </div>
                 </DialogContent>
               </Dialog>
