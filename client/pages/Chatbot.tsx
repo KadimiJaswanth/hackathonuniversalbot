@@ -32,6 +32,9 @@ import {
   Home,
   Settings,
   Camera,
+  Pause,
+  Play,
+  Square,
 } from "lucide-react";
 
 interface Message {
@@ -307,28 +310,39 @@ export default function Chatbot() {
     if (!file && !dataUrl) return;
     try {
       setCaptionLoading(true);
-      // Use server-side combined Caption+OCR
+      // Use server-side combined Caption+OCR when available; otherwise OCR fallback
       let caption = "";
-      if (file) {
-        const fd = new FormData();
-        fd.append("image", file);
-        const up = await fetch("/api/caption", { method: "POST", body: fd });
-        if (up.ok) {
-          const dataUp = await up.json();
-          caption = (dataUp?.caption || "").trim();
+      try {
+        if (file) {
+          const fd = new FormData();
+          fd.append("image", file);
+          const up = await fetch("/api/caption", { method: "POST", body: fd });
+          if (up.ok) {
+            const dataUp = await up.json();
+            caption = (dataUp?.caption || "").trim();
+          }
+        } else if (dataUrl) {
+          const blob = await dataUrlToBlob(dataUrl);
+          const fd = new FormData();
+          fd.append("image", blob, "capture.png");
+          const up = await fetch("/api/caption", { method: "POST", body: fd });
+          if (up.ok) {
+            const dataUp = await up.json();
+            caption = (dataUp?.caption || "").trim();
+          }
         }
-      } else if (dataUrl) {
-        const blob = await dataUrlToBlob(dataUrl);
-        const fd = new FormData();
-        fd.append("image", blob, "capture.png");
-        const up = await fetch("/api/caption", { method: "POST", body: fd });
-        if (up.ok) {
-          const dataUp = await up.json();
-          caption = (dataUp?.caption || "").trim();
-        }
+      } catch {}
+
+      let combined = caption;
+      if ((!combined || !combined.trim()) && dataUrl) {
+        try {
+          const text = await ocrOnDataUrl(dataUrl);
+          if (text) combined = text;
+        } catch {}
       }
-      if (caption) {
-        const final = await translateIfNeeded(caption);
+
+      if (combined && combined.trim()) {
+        const final = await translateIfNeeded(combined.trim());
         const botResponse: Message = {
           id: (Date.now() + 5).toString(),
           content: final,
@@ -496,6 +510,39 @@ export default function Chatbot() {
         });
       });
     }
+  };
+
+  const pauseSpeech = () => {
+    const w = typeof window !== "undefined" ? (window as any) : null;
+    try {
+      if (audioRef.current && !audioRef.current.paused) {
+        audioRef.current.pause();
+      }
+      w?.speechSynthesis?.pause?.();
+    } catch {}
+  };
+
+  const resumeSpeech = () => {
+    const w = typeof window !== "undefined" ? (window as any) : null;
+    try {
+      if (audioRef.current && audioRef.current.paused && audioRef.current.currentTime > 0) {
+        audioRef.current.play().catch(() => {});
+      }
+      w?.speechSynthesis?.resume?.();
+      setIsSpeaking(true);
+    } catch {}
+  };
+
+  const stopSpeech = () => {
+    const w = typeof window !== "undefined" ? (window as any) : null;
+    try {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      w?.speechSynthesis?.cancel?.();
+    } catch {}
+    setIsSpeaking(false);
   };
 
   const speakText = async () => {
@@ -690,6 +737,18 @@ export default function Chatbot() {
               >
                 <Volume2 className="mr-2 h-4 w-4" />
                 {isSpeaking ? "Speaking..." : "Text-to-Speech"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={pauseSpeech}>
+                <Pause className="mr-2 h-4 w-4" />
+                Pause
+              </Button>
+              <Button variant="outline" size="sm" onClick={resumeSpeech}>
+                <Play className="mr-2 h-4 w-4" />
+                Resume
+              </Button>
+              <Button variant="outline" size="sm" onClick={stopSpeech}>
+                <Square className="mr-2 h-4 w-4" />
+                Stop
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1014,42 +1073,36 @@ export default function Chatbot() {
                         variant="outline"
                         onClick={async () => {
                           if (!lastImage) return;
+                          setCaptionLoading(true);
                           try {
-                            setCaptionLoading(true);
-                            // Caption (prefer multipart upload for best quality)
                             let caption = "";
-                            if (lastFile) {
-                              const fd = new FormData();
-                              fd.append("image", lastFile);
-                              const up = await fetch(
-                                "/api/image-to-text-upload",
-                                {
+                            try {
+                              if (lastFile) {
+                                const fd = new FormData();
+                                fd.append("image", lastFile);
+                                const up = await fetch("/api/image-to-text-upload", {
                                   method: "POST",
                                   body: fd,
-                                },
-                              );
-                              if (!up.ok)
-                                throw new Error("caption-upload-failed");
-                              const dataUp = await up.json();
-                              caption = (dataUp?.caption || "").trim();
-                            } else if (lastImage) {
-                              // Convert dataURL capture to Blob and upload
-                              const blob = await dataUrlToBlob(lastImage);
-                              const fd = new FormData();
-                              fd.append("image", blob, "capture.png");
-                              const up = await fetch(
-                                "/api/image-to-text-upload",
-                                {
+                                });
+                                if (up.ok) {
+                                  const dataUp = await up.json();
+                                  caption = (dataUp?.caption || "").trim();
+                                }
+                              } else if (lastImage) {
+                                const blob = await dataUrlToBlob(lastImage);
+                                const fd = new FormData();
+                                fd.append("image", blob, "capture.png");
+                                const up = await fetch("/api/image-to-text-upload", {
                                   method: "POST",
                                   body: fd,
-                                },
-                              );
-                              if (!up.ok)
-                                throw new Error("caption-upload-failed");
-                              const dataUp = await up.json();
-                              caption = (dataUp?.caption || "").trim();
-                            }
-                            // OCR on the same image
+                                });
+                                if (up.ok) {
+                                  const dataUp = await up.json();
+                                  caption = (dataUp?.caption || "").trim();
+                                }
+                              }
+                            } catch {}
+
                             const ocrText = await ocrOnDataUrl(lastImage);
                             const combined = caption
                               ? ocrText
@@ -1092,7 +1145,7 @@ export default function Chatbot() {
                         }}
                         disabled={captionLoading || !lastImage}
                       >
-                        {captionLoading ? "Describing..." : "Describe (HF)"}
+                        {captionLoading ? "Describing..." : "Describe (Caption + OCR)"}
                       </Button>
                       <Button
                         variant="outline"
