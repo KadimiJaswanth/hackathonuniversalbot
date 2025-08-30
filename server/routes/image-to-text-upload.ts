@@ -23,7 +23,7 @@ async function requestCaption(
       Accept: "application/json",
       "x-wait-for-model": "true",
     },
-    body: buf,
+    body: buf as any,
   });
   if (!upstream.ok) {
     const detail = await upstream.text().catch(() => "");
@@ -99,13 +99,11 @@ export const handleImageToTextUpload: RequestHandler = async (req, res) => {
       }
     }
     const status = (lastErr?.status as number) || 502;
-    res
-      .status(502)
-      .json({
-        error: "Hugging Face request failed",
-        status,
-        detail: lastErr?.detail || String(lastErr || ""),
-      });
+    res.status(502).json({
+      error: "Hugging Face request failed",
+      status,
+      detail: lastErr?.detail || String(lastErr || ""),
+    });
   } catch (err) {
     res.status(500).json({ error: "Unexpected server error" });
   }

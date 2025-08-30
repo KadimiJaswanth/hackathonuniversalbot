@@ -1,6 +1,7 @@
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -32,6 +33,9 @@ import {
   Home,
   Settings,
   Camera,
+  Pause,
+  Play,
+  Square,
 } from "lucide-react";
 
 interface Message {
@@ -68,6 +72,8 @@ export default function Chatbot() {
   const [captionLoading, setCaptionLoading] = useState(false);
   const [lastImage, setLastImage] = useState<string | null>(null);
   const [lastFile, setLastFile] = useState<File | null>(null);
+  const [extractedText, setExtractedText] = useState("");
+  const [ocrError, setOcrError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [usecase, setUsecase] = useState<null | {
     key: string;
@@ -307,28 +313,39 @@ export default function Chatbot() {
     if (!file && !dataUrl) return;
     try {
       setCaptionLoading(true);
-      // Use server-side combined Caption+OCR
+      // Use server-side combined Caption+OCR when available; otherwise OCR fallback
       let caption = "";
-      if (file) {
-        const fd = new FormData();
-        fd.append("image", file);
-        const up = await fetch("/api/caption", { method: "POST", body: fd });
-        if (up.ok) {
-          const dataUp = await up.json();
-          caption = (dataUp?.caption || "").trim();
+      try {
+        if (file) {
+          const fd = new FormData();
+          fd.append("image", file);
+          const up = await fetch("/api/caption", { method: "POST", body: fd });
+          if (up.ok) {
+            const dataUp = await up.json();
+            caption = (dataUp?.caption || "").trim();
+          }
+        } else if (dataUrl) {
+          const blob = await dataUrlToBlob(dataUrl);
+          const fd = new FormData();
+          fd.append("image", blob, "capture.png");
+          const up = await fetch("/api/caption", { method: "POST", body: fd });
+          if (up.ok) {
+            const dataUp = await up.json();
+            caption = (dataUp?.caption || "").trim();
+          }
         }
-      } else if (dataUrl) {
-        const blob = await dataUrlToBlob(dataUrl);
-        const fd = new FormData();
-        fd.append("image", blob, "capture.png");
-        const up = await fetch("/api/caption", { method: "POST", body: fd });
-        if (up.ok) {
-          const dataUp = await up.json();
-          caption = (dataUp?.caption || "").trim();
-        }
+      } catch {}
+
+      let combined = caption;
+      if ((!combined || !combined.trim()) && dataUrl) {
+        try {
+          const text = await ocrOnDataUrl(dataUrl);
+          if (text) combined = text;
+        } catch {}
       }
-      if (caption) {
-        const final = await translateIfNeeded(caption);
+
+      if (combined && combined.trim()) {
+        const final = await translateIfNeeded(combined.trim());
         const botResponse: Message = {
           id: (Date.now() + 5).toString(),
           content: final,
@@ -368,7 +385,7 @@ export default function Chatbot() {
         await new Promise<void>((resolve, reject) => {
           const s = document.createElement("script");
           s.src =
-            "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+            "https://cdn.jsdelivr.net/npm/tesseract.js@5.0.1/dist/tesseract.min.js";
           s.onload = () => resolve();
           s.onerror = () => reject(new Error("Failed to load OCR"));
           document.head.appendChild(s);
@@ -498,6 +515,43 @@ export default function Chatbot() {
     }
   };
 
+  const pauseSpeech = () => {
+    const w = typeof window !== "undefined" ? (window as any) : null;
+    try {
+      if (audioRef.current && !audioRef.current.paused) {
+        audioRef.current.pause();
+      }
+      w?.speechSynthesis?.pause?.();
+    } catch {}
+  };
+
+  const resumeSpeech = () => {
+    const w = typeof window !== "undefined" ? (window as any) : null;
+    try {
+      if (
+        audioRef.current &&
+        audioRef.current.paused &&
+        audioRef.current.currentTime > 0
+      ) {
+        audioRef.current.play().catch(() => {});
+      }
+      w?.speechSynthesis?.resume?.();
+      setIsSpeaking(true);
+    } catch {}
+  };
+
+  const stopSpeech = () => {
+    const w = typeof window !== "undefined" ? (window as any) : null;
+    try {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      w?.speechSynthesis?.cancel?.();
+    } catch {}
+    setIsSpeaking(false);
+  };
+
   const speakText = async () => {
     const w = typeof window !== "undefined" ? (window as any) : null;
     const textToSpeak =
@@ -582,7 +636,29 @@ export default function Chatbot() {
   }, []);
 
   useEffect(() => {
-    if (!ocrOpen) {
+    if (ocrOpen) {
+      (async () => {
+        try {
+          setOcrError(null);
+          const constraints: MediaStreamConstraints = {
+            video: { facingMode: { ideal: "environment" } },
+            audio: false,
+          };
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          streamRef.current = stream;
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            try {
+              await videoRef.current.play();
+            } catch {}
+          }
+        } catch (e) {
+          setOcrError(
+            "Camera access blocked. Open Preview in a new tab and allow camera permissions.",
+          );
+        }
+      })();
+    } else {
       try {
         const tracks = streamRef.current?.getTracks?.() || [];
         tracks.forEach((t) => t.stop());
@@ -651,6 +727,23 @@ export default function Chatbot() {
     }
   };
 
+  useEffect(() => {
+    (async () => {
+      try {
+        if (navigator.mediaDevices?.getUserMedia) {
+          const mic = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+          });
+          mic.getTracks().forEach((t) => t.stop());
+          const cam = await navigator.mediaDevices.getUserMedia({
+            video: true,
+          });
+          cam.getTracks().forEach((t) => t.stop());
+        }
+      } catch {}
+    })();
+  }, []);
+
   return (
     <Layout>
       <div className="flex h-[calc(100vh-8rem)]">
@@ -690,6 +783,18 @@ export default function Chatbot() {
               >
                 <Volume2 className="mr-2 h-4 w-4" />
                 {isSpeaking ? "Speaking..." : "Text-to-Speech"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={pauseSpeech}>
+                <Pause className="mr-2 h-4 w-4" />
+                Pause
+              </Button>
+              <Button variant="outline" size="sm" onClick={resumeSpeech}>
+                <Play className="mr-2 h-4 w-4" />
+                Resume
+              </Button>
+              <Button variant="outline" size="sm" onClick={stopSpeech}>
+                <Square className="mr-2 h-4 w-4" />
+                Stop
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -846,7 +951,7 @@ export default function Chatbot() {
                   <Camera className="mr-2 h-4 w-4" />
                   Image to Text
                 </Button>
-                <DialogContent>
+                <DialogContent className="sm:max-w-md">
                   <DialogHeader>
                     <DialogTitle>Image to Text</DialogTitle>
                     <DialogDescription>
@@ -856,7 +961,7 @@ export default function Chatbot() {
                   <div className="space-y-3">
                     <video
                       ref={videoRef}
-                      className="w-full rounded border"
+                      className="w-full rounded border max-h-40 object-contain"
                       autoPlay
                       playsInline
                       muted
@@ -865,37 +970,15 @@ export default function Chatbot() {
                       <img
                         src={lastImage}
                         alt="Selected preview"
-                        className="w-full max-h-60 object-contain rounded border"
+                        className="w-full max-h-40 object-contain rounded border"
                       />
+                    ) : null}
+                    {ocrError ? (
+                      <p className="text-xs text-destructive">{ocrError}</p>
                     ) : null}
                     <div className="flex gap-2">
                       <Button
                         variant="outline"
-                        onClick={async () => {
-                          try {
-                            const constraints: MediaStreamConstraints = {
-                              video: { facingMode: { ideal: "environment" } },
-                              audio: false,
-                            };
-                            const stream =
-                              await navigator.mediaDevices.getUserMedia(
-                                constraints,
-                              );
-                            streamRef.current = stream;
-                            if (videoRef.current) {
-                              videoRef.current.srcObject = stream;
-                              try {
-                                await videoRef.current.play();
-                              } catch {}
-                            }
-                          } catch (e) {
-                            // ignore
-                          }
-                        }}
-                      >
-                        Start Camera
-                      </Button>
-                      <Button
                         onClick={async () => {
                           const video = videoRef.current;
                           if (!video) return;
@@ -911,60 +994,20 @@ export default function Chatbot() {
                             canvas.width,
                             canvas.height,
                           );
-                          // Simple preprocessing to improve OCR accuracy
-                          try {
-                            const img = ctx.getImageData(
-                              0,
-                              0,
-                              canvas.width,
-                              canvas.height,
-                            );
-                            const d = img.data;
-                            for (let i = 0; i < d.length; i += 4) {
-                              const r = d[i],
-                                g = d[i + 1],
-                                b = d[i + 2];
-                              let v = 0.2126 * r + 0.7152 * g + 0.0722 * b; // grayscale
-                              v = v * 1.2 - 20; // contrast/brightness tweak
-                              v = v < 0 ? 0 : v > 255 ? 255 : v;
-                              const thr = v > 180 ? 255 : 0; // binarize
-                              d[i] = d[i + 1] = d[i + 2] = thr;
-                            }
-                            ctx.putImageData(img, 0, 0);
-                          } catch {}
                           const dataUrl = canvas.toDataURL("image/png");
                           setLastImage(dataUrl);
                           setLastFile(null);
+                        }}
+                      >
+                        Capture Photo
+                      </Button>
+                      <Button
+                        onClick={async () => {
+                          if (!lastImage) return;
                           setOcrLoading(true);
                           try {
-                            // Load Tesseract.js from CDN lazily
-                            if (!(window as any).Tesseract) {
-                              await new Promise<void>((resolve, reject) => {
-                                const s = document.createElement("script");
-                                s.src =
-                                  "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
-                                s.onload = () => resolve();
-                                s.onerror = () =>
-                                  reject(new Error("Failed to load OCR"));
-                                document.head.appendChild(s);
-                              });
-                            }
-                            const { Tesseract } = window as any;
-                            const ocr = readSetting<string>(
-                              "settings.ocrLang",
-                              "eng",
-                            );
-                            const result = await Tesseract.recognize(
-                              dataUrl,
-                              ocr,
-                              {
-                                tessedit_char_whitelist:
-                                  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -'",
-                                preserve_interword_spaces: "1",
-                                tessedit_pageseg_mode: "6",
-                              },
-                            );
-                            const text = result?.data?.text?.trim();
+                            const text = await ocrOnDataUrl(lastImage);
+                            setExtractedText(text || "");
                             if (text) {
                               const final = await translateIfNeeded(text);
                               const botResponse: Message = {
@@ -978,121 +1021,9 @@ export default function Chatbot() {
                           } catch {}
                           setOcrLoading(false);
                         }}
-                        disabled={ocrLoading}
+                        disabled={ocrLoading || !lastImage}
                       >
-                        {ocrLoading ? "Processing..." : "OCR (Extract Text)"}
-                      </Button>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={async (e) => {
-                          const f = e.target.files?.[0];
-                          if (!f) return;
-                          const reader = new FileReader();
-                          reader.onload = async () => {
-                            const dataUrl = reader.result as string;
-                            setLastImage(dataUrl);
-                            setLastFile(f);
-                            await describeFromSource(f, dataUrl);
-                            try {
-                              if (fileInputRef.current)
-                                (fileInputRef.current as any).value = "";
-                            } catch {}
-                          };
-                          reader.readAsDataURL(f);
-                        }}
-                      />
-                      <Button
-                        variant="outline"
-                        onClick={() => fileInputRef.current?.click()}
-                      >
-                        Upload Image
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={async () => {
-                          if (!lastImage) return;
-                          try {
-                            setCaptionLoading(true);
-                            // Caption (prefer multipart upload for best quality)
-                            let caption = "";
-                            if (lastFile) {
-                              const fd = new FormData();
-                              fd.append("image", lastFile);
-                              const up = await fetch(
-                                "/api/image-to-text-upload",
-                                {
-                                  method: "POST",
-                                  body: fd,
-                                },
-                              );
-                              if (!up.ok)
-                                throw new Error("caption-upload-failed");
-                              const dataUp = await up.json();
-                              caption = (dataUp?.caption || "").trim();
-                            } else if (lastImage) {
-                              // Convert dataURL capture to Blob and upload
-                              const blob = await dataUrlToBlob(lastImage);
-                              const fd = new FormData();
-                              fd.append("image", blob, "capture.png");
-                              const up = await fetch(
-                                "/api/image-to-text-upload",
-                                {
-                                  method: "POST",
-                                  body: fd,
-                                },
-                              );
-                              if (!up.ok)
-                                throw new Error("caption-upload-failed");
-                              const dataUp = await up.json();
-                              caption = (dataUp?.caption || "").trim();
-                            }
-                            // OCR on the same image
-                            const ocrText = await ocrOnDataUrl(lastImage);
-                            const combined = caption
-                              ? ocrText
-                                ? `${caption}\n\n${ocrText}`
-                                : caption
-                              : ocrText;
-                            if (combined) {
-                              const final = await translateIfNeeded(combined);
-                              const botResponse: Message = {
-                                id: (Date.now() + 5).toString(),
-                                content: final,
-                                isUser: false,
-                                timestamp: new Date(),
-                              };
-                              setMessages((prev) => [...prev, botResponse]);
-                            } else {
-                              setMessages((prev) => [
-                                ...prev,
-                                {
-                                  id: (Date.now() + 10).toString(),
-                                  content: "No description or text found.",
-                                  isUser: false,
-                                  timestamp: new Date(),
-                                },
-                              ]);
-                            }
-                          } catch {
-                            setMessages((prev) => [
-                              ...prev,
-                              {
-                                id: (Date.now() + 11).toString(),
-                                content: "Image processing unavailable.",
-                                isUser: false,
-                                timestamp: new Date(),
-                              },
-                            ]);
-                          } finally {
-                            setCaptionLoading(false);
-                          }
-                        }}
-                        disabled={captionLoading || !lastImage}
-                      >
-                        {captionLoading ? "Describing..." : "Describe (HF)"}
+                        {ocrLoading ? "Extracting..." : "Extract Text"}
                       </Button>
                       <Button
                         variant="outline"
@@ -1107,10 +1038,20 @@ export default function Chatbot() {
                         Stop Camera
                       </Button>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Tip: Use "Describe (HF)" for scene/product descriptions.
-                      Use OCR to read printed text in the image.
-                    </p>
+                    <div className="space-y-2 w-full">
+                      <label className="text-sm font-medium">
+                        Extracted Text
+                      </label>
+                      <Textarea
+                        value={extractedText}
+                        onChange={(e) => setExtractedText(e.target.value)}
+                        placeholder="No text extracted yet."
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Tip: Capture first, then use “Extract Text”. Use
+                        “Describe (Caption + OCR)” for scene descriptions.
+                      </p>
+                    </div>
                   </div>
                 </DialogContent>
               </Dialog>
