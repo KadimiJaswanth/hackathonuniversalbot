@@ -528,7 +528,11 @@ export default function Chatbot() {
   const resumeSpeech = () => {
     const w = typeof window !== "undefined" ? (window as any) : null;
     try {
-      if (audioRef.current && audioRef.current.paused && audioRef.current.currentTime > 0) {
+      if (
+        audioRef.current &&
+        audioRef.current.paused &&
+        audioRef.current.currentTime > 0
+      ) {
         audioRef.current.play().catch(() => {});
       }
       w?.speechSynthesis?.resume?.();
@@ -650,7 +654,7 @@ export default function Chatbot() {
           }
         } catch (e) {
           setOcrError(
-            "Camera access blocked. Open Preview in a new tab and allow camera permissions."
+            "Camera access blocked. Open Preview in a new tab and allow camera permissions.",
           );
         }
       })();
@@ -727,9 +731,13 @@ export default function Chatbot() {
     (async () => {
       try {
         if (navigator.mediaDevices?.getUserMedia) {
-          const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const mic = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+          });
           mic.getTracks().forEach((t) => t.stop());
-          const cam = await navigator.mediaDevices.getUserMedia({ video: true });
+          const cam = await navigator.mediaDevices.getUserMedia({
+            video: true,
+          });
           cam.getTracks().forEach((t) => t.stop());
         }
       } catch {}
@@ -979,7 +987,13 @@ export default function Chatbot() {
                           canvas.height = video.videoHeight || 480;
                           const ctx = canvas.getContext("2d");
                           if (!ctx) return;
-                          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                          ctx.drawImage(
+                            video,
+                            0,
+                            0,
+                            canvas.width,
+                            canvas.height,
+                          );
                           const dataUrl = canvas.toDataURL("image/png");
                           setLastImage(dataUrl);
                           setLastFile(null);
@@ -1025,14 +1039,17 @@ export default function Chatbot() {
                       </Button>
                     </div>
                     <div className="space-y-2 w-full">
-                      <label className="text-sm font-medium">Extracted Text</label>
+                      <label className="text-sm font-medium">
+                        Extracted Text
+                      </label>
                       <Textarea
                         value={extractedText}
                         onChange={(e) => setExtractedText(e.target.value)}
                         placeholder="No text extracted yet."
                       />
                       <p className="text-xs text-muted-foreground">
-                        Tip: Capture first, then use “Extract Text”. Use “Describe (Caption + OCR)” for scene descriptions.
+                        Tip: Capture first, then use “Extract Text”. Use
+                        “Describe (Caption + OCR)” for scene descriptions.
                       </p>
                     </div>
                   </div>

@@ -99,13 +99,11 @@ export const handleImageToTextUpload: RequestHandler = async (req, res) => {
       }
     }
     const status = (lastErr?.status as number) || 502;
-    res
-      .status(502)
-      .json({
-        error: "Hugging Face request failed",
-        status,
-        detail: lastErr?.detail || String(lastErr || ""),
-      });
+    res.status(502).json({
+      error: "Hugging Face request failed",
+      status,
+      detail: lastErr?.detail || String(lastErr || ""),
+    });
   } catch (err) {
     res.status(500).json({ error: "Unexpected server error" });
   }
