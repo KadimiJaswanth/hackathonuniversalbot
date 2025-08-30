@@ -73,6 +73,7 @@ export default function Chatbot() {
   const [lastImage, setLastImage] = useState<string | null>(null);
   const [lastFile, setLastFile] = useState<File | null>(null);
   const [extractedText, setExtractedText] = useState("");
+  const [ocrError, setOcrError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [usecase, setUsecase] = useState<null | {
     key: string;
@@ -384,7 +385,7 @@ export default function Chatbot() {
         await new Promise<void>((resolve, reject) => {
           const s = document.createElement("script");
           s.src =
-            "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+            "https://cdn.jsdelivr.net/npm/tesseract.js@5.0.1/dist/tesseract.min.js";
           s.onload = () => resolve();
           s.onerror = () => reject(new Error("Failed to load OCR"));
           document.head.appendChild(s);
@@ -634,6 +635,7 @@ export default function Chatbot() {
     if (ocrOpen) {
       (async () => {
         try {
+          setOcrError(null);
           const constraints: MediaStreamConstraints = {
             video: { facingMode: { ideal: "environment" } },
             audio: false,
@@ -646,7 +648,11 @@ export default function Chatbot() {
               await videoRef.current.play();
             } catch {}
           }
-        } catch {}
+        } catch (e) {
+          setOcrError(
+            "Camera access blocked. Open Preview in a new tab and allow camera permissions."
+          );
+        }
       })();
     } else {
       try {
@@ -958,6 +964,9 @@ export default function Chatbot() {
                         alt="Selected preview"
                         className="w-full max-h-40 object-contain rounded border"
                       />
+                    ) : null}
+                    {ocrError ? (
+                      <p className="text-xs text-destructive">{ocrError}</p>
                     ) : null}
                     <div className="flex gap-2">
                       <Button
